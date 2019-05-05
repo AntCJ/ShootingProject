@@ -1,33 +1,25 @@
-import java.util.ArrayList;
-import java.lang.Math;
-
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.Shape;
-import java.awt.Color;
-import java.awt.geom.Ellipse2D;
-import java.awt.geom.Rectangle2D;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.MouseMotionAdapter;
-import java.awt.event.KeyAdapter;
-import java.awt.event.KeyEvent;
-import java.awt.event.AdjustmentListener;
-import java.awt.event.AdjustmentEvent;
-
-import javax.swing.JPanel;
-import javax.swing.JFrame;
-import javax.swing.JScrollBar;
+import java.util.*;
+import java.util.concurrent.*;
+import java.lang.*;
+import java.text.*;
+import java.awt.*;
+import java.awt.geom.*;
+import java.awt.event.*;
+import javax.swing.*;
+import javax.imageio.ImageIO;
+import java.io.*;
 
 public class shootingProject extends JPanel{
 	private int[] windowSize = {800,500};
+	private int[] gameArea = {windowSize[0]*2,windowSize[1]};
+	private int groundLevel = windowSize[1]*5/6;
 	private double playerPos[] = new double[2];
+	private int cameraOffset = 0;
 	private double[] mouseStartPos = {windowSize[0]*1/4,windowSize[1]*2/3};
 	private double[] mouseMovingPos = {windowSize[0]*1/4,windowSize[1]*2/3};
 	private double[] mouseEndPos = {windowSize[0]*1/4,windowSize[1]*2/3};
 	private boolean mousePressed;
 	private boolean mouseDrag;
-	private int cameraOffset = 0;
 	private int FPS = 175;
 	private boolean running = true;
 	
@@ -36,8 +28,14 @@ public class shootingProject extends JPanel{
 	private int playerIndex = 0;
 	private double velocity = 0;
 	private double angle = 0;
-	private int groundLevel = windowSize[1]*5/6;
+	private double velMultiplier = 0.03;
+	private double [] wind = {-0.03,0,0.03};
+	private double currentWind = wind[1];
 	private final double GRAVITY = 9.8/FPS;
+	
+	private boolean freezeCtrl = false;
+	
+	private Image background;
 	
 	private shootingProject() {
 		setFocusable(true);
@@ -46,7 +44,7 @@ public class shootingProject extends JPanel{
 		addMouseListener(new MouseAdapter() {
 			@Override
 			public void mousePressed(MouseEvent e) {
-				if(e.getButton() == MouseEvent.BUTTON1) {
+				if(e.getButton() == MouseEvent.BUTTON1 && !freezeCtrl) {
 					mouseStartPos[0] = e.getX();
 					mouseStartPos[1] = e.getY();
 				} 
@@ -55,11 +53,10 @@ public class shootingProject extends JPanel{
 			
 			@Override
 			public void mouseReleased(MouseEvent e) {
-				if(e.getButton() == MouseEvent.BUTTON1) {	
-					mouseEndPos[0] = e.getX();
-					mouseEndPos[1] = e.getY();
-					arrows.add(new Arrow(playerPos[0],playerPos[1],0.1*(mouseStartPos[0]-mouseEndPos[0]),0.1*(mouseStartPos[1]-mouseEndPos[1])));
-					
+				if(e.getButton() == MouseEvent.BUTTON1 && !freezeCtrl) {	
+					mouseEndPos[0] = mouseMovingPos[0];
+					mouseEndPos[1] = mouseMovingPos[1];
+					arrows.add(new Arrow(playerPos[0],playerPos[1],velMultiplier*(mouseStartPos[0]-mouseEndPos[0]),velMultiplier*(mouseStartPos[1]-mouseEndPos[1])));
 					mousePressed = false;
 					mouseDrag = false;
 				} 
@@ -69,11 +66,21 @@ public class shootingProject extends JPanel{
 		addMouseMotionListener(new MouseMotionAdapter() {
 			@Override
 			public void mouseDragged(MouseEvent e) {
-				if (mousePressed) {
-					mouseMovingPos[0] = e.getX();
-					mouseMovingPos[1] = e.getY();
+				if (!freezeCtrl) {
+					if (mousePressed) {
+						mouseMovingPos[0] = e.getX();
+						mouseMovingPos[1] = e.getY();
+						
+						//Limit movement only towards front of player
+						if (playerIndex == 0 && mouseMovingPos[0] > mouseStartPos[0]) {
+							mouseMovingPos[0] = mouseStartPos[0];
+						}
+						else if (playerIndex == 1 && mouseMovingPos[0] < mouseStartPos[0]) {
+							mouseMovingPos[0] = mouseStartPos[0];
+						}
+					}
+					mouseDrag = true;
 				}
-				mouseDrag = true;
 			}
 		});
 		
@@ -110,31 +117,57 @@ public class shootingProject extends JPanel{
 		
 		players.add(new Player(0));		//index 0 for player 1, index 1 for player 2
 		players.add(new Player(1));
+		
+		try {
+            loadImages();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+	}
+	
+	private void loadImages() throws IOException {
+		background = Toolkit.getDefaultToolkit().createImage(System.getProperty("user.dir")+"\\images\\background.gif").getScaledInstance(gameArea[0], windowSize[1], Image.SCALE_DEFAULT);
 	}
 	
 	@Override
 	public void paintComponent(Graphics g1) {
 		Graphics2D g = (Graphics2D) g1;
+		super.paintComponent(g1);
+		g.drawImage(background,-cameraOffset,0,this);
 		
-		//clear screen
 		g.setColor(Color.WHITE);
-		g.fillRect(0, 0, windowSize[0], windowSize[1]);
-		
-		g.setColor(Color.BLACK);
+		g.setStroke(new BasicStroke(2));
 		g.drawLine(0, groundLevel, windowSize[0], groundLevel);
-		g.drawString("Velocity = "+showDecimal(velocity)+" m/s",30,30);
-		g.drawString("Angle = "+showDecimal(angle)+" deg",30,50);
+		g.setStroke(new BasicStroke(1));
+		
+		if (currentWind == wind[0]) {
+			g.drawString("Wind:  <<",30,50);
+		}
+		else if (currentWind == wind[1]) {
+			g.drawString("Wind:  --",30,50);
+		}
+		else {
+			g.drawString("Wind:  >>",30,50);
+		}
+		
 		if (players.get(0).life > 0 && players.get(1).life > 0)
-			g.drawString("Player "+(playerIndex+1)+"'s turn",30,70);
+			g.drawString("Player "+(playerIndex+1)+"'s turn",30,30);
 		else if (players.get(0).life <= 0) {
 			g.setColor(Color.RED);
-			g.drawString("Player 2 wins!",30,70);
+			g.drawString("Player 2 wins!",30,30);
 			running = false;
 		}
 		else if (players.get(1).life <= 0) {
 			g.setColor(Color.RED);
-			g.drawString("Player 1 wins!",30,70);
+			g.drawString("Player 1 wins!",30,30);
 			running = false;
+		}
+		
+		if (mouseDrag){
+			g.setColor(Color.WHITE);
+			g.drawString(new DecimalFormat("#.#").format(velocity)+" m/s",(int)mouseMovingPos[0]+10,(int)mouseMovingPos[1]+10);
+			g.drawString(new DecimalFormat("#.#").format(angle)+" \u00B0",(int)mouseStartPos[0],(int)mouseStartPos[1]);
+			g.drawLine((int)mouseStartPos[0],(int)mouseStartPos[1],(int)mouseMovingPos[0],(int)mouseMovingPos[1]);
 		}
 		
 		for(int i = players.size() - 1; i >= 0; i--) {
@@ -149,19 +182,23 @@ public class shootingProject extends JPanel{
 	private void update() {
 		playerPos[0] = players.get(playerIndex).getPlayerPosx();
 		playerPos[1] = players.get(playerIndex).getPlayerPosy();
+		
 		if (mouseDrag) {
 			angle = -Math.atan((mouseStartPos[1]-mouseMovingPos[1])/(mouseStartPos[0]-mouseMovingPos[0]))*180/Math.PI;
-			velocity = 0.1*(mouseStartPos[0]-mouseMovingPos[0]);
+			velocity = velMultiplier*Math.sqrt(Math.pow(mouseStartPos[0]-mouseMovingPos[0],2)+Math.pow(mouseStartPos[1]-mouseMovingPos[1],2));
+			
+			//when start dragging mouse, the camera automatically move to that player screen
 			if (playerIndex == 0) {
 				cameraOffset = 0;
 			}
 			else {
-				cameraOffset = 800;
+				cameraOffset = gameArea[0]-windowSize[0];
 				angle *= -1;
-				velocity *= -1;
 			}
 		}
-
+		
+		freezeCtrl = !(arrows.size() == 0 ||!arrows.get(arrows.size()-1).arrowMoving) || !running;
+		
 		for(int i = players.size() - 1; i >= 0; i--) {
 			players.get(i).update(); 
 		}
@@ -170,26 +207,16 @@ public class shootingProject extends JPanel{
 		}
 	}
 	
-	private String showDecimal(double number) {
-		String[] numberString = String.valueOf(number).split("");
-		if (number >= 10 || (number < 0 && number > -10))
-			return (numberString[0]+numberString[1]+numberString[2]+numberString[3]);
-		else if (number < -10)
-			return (numberString[0]+numberString[1]+numberString[2]+numberString[3]+numberString[4]);
-		else
-			return (numberString[0]+numberString[1]+numberString[2]);
-	}
-	
 	private void cameraMove(int movedPixels) {
 		cameraOffset += movedPixels;
 		if (cameraOffset < 0)
 			cameraOffset = 0;
-		else if (cameraOffset > windowSize[0])
-			cameraOffset = windowSize[0];
+		else if (cameraOffset > gameArea[0]-windowSize[0])
+			cameraOffset = gameArea[0]-windowSize[0];
 	}
 	
 	private void cameraTo(int target) {
-		if (target >= 0 && target <= windowSize[0]) {
+		if (target >= 0 && target <= gameArea[0]-windowSize[0]) {
 			cameraOffset = target;
 		}
 	}
@@ -198,8 +225,8 @@ public class shootingProject extends JPanel{
 		private double x, y, x2, y2, velx, vely;
 		private int arrowLength = 20;
 		private int arrowDistance;
-		private Color arrowColor = Color.BLACK;
 		private boolean arrowMoving = true;
+		private Color arrowColor = Color.BLACK;
 		private Arrow(double x, double y, double velx, double vely) {
 			this.x = x;
 			this.y = y;
@@ -209,6 +236,7 @@ public class shootingProject extends JPanel{
 		
 		private void update() {
 			if (arrowMoving && y < groundLevel && (!hitPlayer())) {
+				velx += currentWind;
 				vely += GRAVITY;
 				x += velx;
 				y += vely;
@@ -216,14 +244,41 @@ public class shootingProject extends JPanel{
 				if (playerIndex == 0)
 					arrowDistance = (int)(x-playerPos[0]);
 				else
-					arrowDistance = (int)(windowSize[0]-(playerPos[0]-x));
+					arrowDistance = (int)(gameArea[0]-windowSize[0]-(playerPos[0]-x));
 				cameraTo(arrowDistance);
 			}
-			else if (arrowMoving) {
+			if (arrowMoving && (x < -30 || x > gameArea[0]+30 || y >= groundLevel || hitPlayer())) {
 				if (hitPlayer())
 					reduceLife();
 				playerIndex = Math.abs(playerIndex-1);
+				Random randomWind = new Random();
+				currentWind = wind[randomWind.nextInt(3)];
 				arrowMoving = false;
+				
+				//Move camera to another player
+				if (playerIndex == 0){
+					while (cameraOffset > 0){
+						try {
+							cameraMove(-20);
+							Thread.sleep(5);
+						}
+						catch(InterruptedException ex) {
+							Thread.currentThread().interrupt();
+						}
+					}
+				}
+				else {
+					while (cameraOffset < gameArea[0]-windowSize[0]){
+						try {
+							cameraMove(20);
+							Thread.sleep(5);
+						}
+						catch(InterruptedException ex) {
+							Thread.currentThread().interrupt();
+						}
+					}
+				}
+				
 			}
 			
 			if (hitPlayer()) 
@@ -239,7 +294,9 @@ public class shootingProject extends JPanel{
 			x2 = x-(arrowLength/Math.sqrt(velx*velx+vely*vely))*velx;
 			y2 = y-(arrowLength/Math.sqrt(velx*velx+vely*vely))*vely;
 			g.setColor(arrowColor);
+			g.setStroke(new BasicStroke(2));
 			g.drawLine((int)x-cameraOffset,(int)y,(int)x2-cameraOffset,(int)y2);
+			g.setStroke(new BasicStroke(1));
 		}
 		
 		private boolean hitPlayer() {
@@ -273,7 +330,9 @@ public class shootingProject extends JPanel{
 	private class Player {
 		private int index;
 		private int life = 100;
-		private double[] pos = {windowSize[0]*1/4,windowSize[1]*3/4};
+		private double [] pos = {windowSize[0]*1/4,windowSize[1]*3/4};
+		private double [] mouseDist = new double[2];
+		private double [] endPos = new double[2];
 		private double adjust, adjust2;
 		private Shape head;
 		private Shape body;
@@ -283,53 +342,78 @@ public class shootingProject extends JPanel{
 		}
 		
 		private void draw(Graphics2D g) {
-			g.setColor(Color.BLACK);
+			g.setColor(Color.WHITE);
+			g.setStroke(new BasicStroke(2));
 			g.draw(head);
 			g.draw(body);
-			adjust = 2*windowSize[0]-2*pos[0];							//position adjustment for player 2
-			double [] endPos = {pos[0]+index*adjust+(mouseMovingPos[0]-mouseStartPos[0]),pos[1]+(mouseMovingPos[1]-mouseStartPos[1])};
+			g.setStroke(new BasicStroke(1));
+			adjust = index*(gameArea[0]-2*(pos[0]-10));					//position adjustment for Player 2
+			endPos[0] = pos[0]-10+adjust-cameraOffset;					//bow resting position
+			endPos[1] = pos[1];
 			
 			//mouse-dragged string
 			if (mouseDrag) {
-				g.setColor(Color.BLACK);
-				g.drawLine((int)(pos[0]+index*adjust)-cameraOffset,(int)pos[1],(int)endPos[0]-cameraOffset,(int)endPos[1]);					//arrow while stretching
+				mouseDist[0] = mouseMovingPos[0]-mouseStartPos[0];
+				mouseDist[1] = mouseMovingPos[1]-mouseStartPos[1];
+				
+				//Limit movement to certain extent and only towards front of player
+				if (playerIndex == 0) {
+					if (mouseDist[0] > 0)
+						mouseDist[0] = 0;
+					else if (mouseDist[0] < -200)
+						mouseDist[0] = -200;
+				}
+				else {
+					if (mouseDist[0] > 200)
+						mouseDist[0] = 200;
+					else if (mouseDist[0] < 0)
+						mouseDist[0] = 0;
+				}
+				
+				if (mouseDist[1] > 200)
+					mouseDist[1] = 200;
+				else if (mouseDist[1] < -200)
+					mouseDist[1] = -200;
+				
+				endPos[0] += mouseDist[0]/8;
+				endPos[1] += mouseDist[1]/8;
+				adjust = index*(gameArea[0]-2*pos[0]);
+
+				g.drawLine((int)(pos[0]+adjust-cameraOffset),(int)pos[1],(int)endPos[0],(int)endPos[1]);					//arrow while stretching
 			}
 			else {
-				adjust = 2*windowSize[0]-2*(pos[0]-10);
-				endPos[0] = pos[0]-10+index*adjust;						//bow return to resting position
-				endPos[1] = pos[1];
-				adjust = 2*windowSize[0]-2*(pos[0]-20);
-				adjust2 = 2*(windowSize[0]-pos[0]);
-				g.drawLine((int)(pos[0]-20+index*adjust)-cameraOffset,(int)pos[1],(int)(pos[0]+index*adjust2)-cameraOffset,(int)pos[1]);	//arrow while resting
+				adjust = index*(gameArea[0]-2*(pos[0]-20));
+				adjust2 = index*(gameArea[0]-2*pos[0]);
+				g.drawLine((int)(pos[0]-20+adjust-cameraOffset),(int)pos[1],(int)(pos[0]+adjust2-cameraOffset),(int)pos[1]);	//arrow while resting
 			}
 			
 			//bow and string
-			adjust = 180;
-			int startAngle = (int)(-90+index*adjust);
-			adjust = 2*windowSize[0]-(2*(pos[0]-20)+20);	
-			g.drawArc((int)(pos[0]-20+index*adjust)-cameraOffset,(int)(pos[1]-20),20,40,startAngle,180);
-			adjust = 2*windowSize[0]-2*(pos[0]-10);
-			g.drawLine((int)(pos[0]-10+index*adjust)-cameraOffset,(int)pos[1]-20,(int)endPos[0]-cameraOffset,(int)endPos[1]);
-			g.drawLine((int)endPos[0]-cameraOffset,(int)endPos[1],(int)(pos[0]-10+index*adjust)-cameraOffset,(int)pos[1]+20);
+			adjust = index*180;
+			int startAngle = (int)(-90+adjust);
+			adjust = index*(gameArea[0]-(2*(pos[0]-20)+20));	
+			g.drawArc((int)(pos[0]-20+adjust-cameraOffset),(int)(pos[1]-20),20,40,startAngle,180);
+			adjust = index*(gameArea[0]-2*(pos[0]-10));
+			g.drawLine((int)(pos[0]-10+adjust-cameraOffset),(int)pos[1]-20,(int)endPos[0],(int)endPos[1]);
+			g.drawLine((int)endPos[0],(int)endPos[1],(int)(pos[0]-10+adjust-cameraOffset),(int)pos[1]+20);
 			
 			//life bar
-			adjust = 2*windowSize[0]-(2*(pos[0]-72)+103);
-			g.drawRect((int)(pos[0]-20-50-2+index*adjust-cameraOffset),(int)(pos[1]-35-20-15-2),103,13);
+			adjust = index*(gameArea[0]-(2*(pos[0]-72)+103));
+			g.drawRect((int)(pos[0]-20-50-2+adjust-cameraOffset),(int)(pos[1]-35-20-15-2),103,13);
 			g.setColor(Color.GREEN);
-			adjust = 2*windowSize[0]-(2*(pos[0]-70)+99);
-			g.fillRect((int)(pos[0]-20-50+index*adjust-cameraOffset),(int)(pos[1]-35-20-15),life,10);
+			adjust = index*(gameArea[0]-(2*(pos[0]-70)+99));
+			g.fillRect((int)(pos[0]-20-50+adjust-cameraOffset),(int)(pos[1]-35-20-15),life,10);
 			g.setColor(Color.BLACK);
 		}
 		
 		private void update() {
-			adjust = 2*windowSize[0]-(2*(pos[0]-30)+20);		
-			head = new Ellipse2D.Double(pos[0]-30+index*adjust-cameraOffset,pos[1]-35,20,20);
-			body = new Rectangle2D.Double(pos[0]-30+index*adjust-cameraOffset,pos[1]-15,20,groundLevel-(pos[1]-15));
+			adjust = index*(gameArea[0]-(2*(pos[0]-30)+20));		
+			head = new Ellipse2D.Double(pos[0]-30+adjust-cameraOffset,pos[1]-35,20,20);
+			body = new Rectangle2D.Double(pos[0]-30+adjust-cameraOffset,pos[1]-15,20,groundLevel-(pos[1]-15));
 		}
 		
 		private double getPlayerPosx() {
-			adjust = windowSize[0]*3/2;
-			return pos[0]+index*adjust;
+			adjust = index*(gameArea[0]-windowSize[0]/2);
+			return pos[0]+adjust;
 		}
 		
 		private double getPlayerPosy() {
@@ -347,7 +431,7 @@ public class shootingProject extends JPanel{
 		f.setVisible(true);
 		new Thread() {
 			@Override public void run() {
-				while (game.running) {
+				while (true) {
 					try {
 						Thread.sleep(1000/game.FPS);
 						game.update();
